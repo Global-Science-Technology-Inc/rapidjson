@@ -16,14 +16,14 @@ dnl   ? :+1 : ?   == just some internal changes, nothing breaks but might work
 dnl                  better
 dnl ---------------------------------------------------------------------------
 
-AC_INIT([RapidJSON], m4_esyscmd([scripts/git-version-gen --pure --prefix release- --fallback 0.0.1 .tarball-version]), [carlnygard@fortna.com])
+AC_INIT([rapidjson], m4_esyscmd_s([scripts/git-version-gen --pure --prefix release- --fallback 0.0.1 .tarball-version]), [carlnygard@fortna.com])
 AM_INIT_AUTOMAKE(tar-ustar)
 AC_CONFIG_MACRO_DIR([m4])
 
 dnl ABI_VERSION=0:1:0
 DOCROOT=.
 RELEASE=$VERSION
-BUILD=m4_esyscmd([scripts/git-version-gen --build --prefix release- --fallback 1 .tarball-build-version])
+BUILD=m4_esyscmd_s([scripts/git-version-gen --build --prefix release- --fallback 1 .tarball-build-version])
 
 AC_SUBST(RELEASE)
 AC_SUBST(BUILD)
@@ -43,12 +43,10 @@ dnl AC_ISC_POSIX
 dnl AC_HEADER_STDC
 
 dnl AC_PROG_CC
-AC_PROG_CMAKE
 AC_PROG_CXX
 AC_PROG_CXXCPP
 AM_PROG_LIBTOOL
 AM_SANITY_CHECK
-DOLT
 
 dnl ---------------------------------------------------------------------------
 dnl Set PACKAGE_LOCALE_DIR in config.h.
@@ -117,6 +115,7 @@ dnl -- per library configs
 dnl AC_CONFIG_FILES(pc/fixme.pc)
 dnl AC_CONFIG_FILES(fixme/Makefile)
 
-AC_CONFIG_FILES(RapidJSON.spec)
+AC_CONFIG_FILES(Makefile)
+AC_CONFIG_FILES(rapidjson.spec)
 
 AC_OUTPUT

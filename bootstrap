@@ -22,7 +22,7 @@ function increment_release_flag {
 }
 
 function find_version {
-     grep AC_INIT configure.ac | cut -d'[' -f3 | sed -e "s/[^0-9.]//g"
+    scripts/git-version-gen --pure --prefix release- --fallback 0.0.1 .tarball-version
 }
 
 function autoconf_bootstrap {
