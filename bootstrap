@@ -1,0 +1,382 @@
+#! /bin/bash
+# shellcheck disable=SC2317
+
+arch=$(uname -i)
+scm=git
+sudo=sudo
+configFlags="${configFlags} --enable-maintainer-mode"
+buildroot=$(pwd)/rpmbuild
+
+
+function increment_release_flag {
+    local file
+    local math
+    local newver
+    file=$(ls ./*spec.in)
+    math="1+$(grep '%define RELEASE' "${file}" | sed -e 's/ \+/\t/g' | cut -f3)"
+    newver=$(echo "${math}" | bc)
+
+    cp "${file}" /tmp
+    sed -e "s/\(%define RELEASE[ \t]\+\)[0-9]\+/\1${newver}/" /tmp/"${file}" > "${file}"
+    rm /tmp/"${file}"
+}
+
+function find_version {
+     grep AC_INIT configure.ac | cut -d'[' -f3 | sed -e "s/[^0-9.]//g"
+}
+
+function autoconf_bootstrap {
+    echo "[aclocal]...."
+    aclocal
+    echo "[autoheader]...."
+    autoheader
+    echo "[libtoolize --force]...."
+    libtoolize --force
+    echo "[autoconf]...."
+    autoconf
+    echo "[automake --add-missing]...."
+    automake --add-missing
+    echo "config complete"
+}
+
+function log_rpm_info {
+    local infodir=~/rpms/info
+    [[ -d $infodir ]] || mkdir -p "${infodir}"
+    local version
+    local rel
+    local pwd
+    local pkg
+    local file="${infodir}/${pkg}-${version}-${rel}.info"
+    version=$(find_version)
+    # shellcheck disable=SC2035
+    rel=$(grep "%define RELEASE" *spec.in | sed "s/.*[ \t]\+\([0-9]\+\)/\1/")
+    pwd=$(pwd)
+    pkg=$(basename "${pwd}")
+
+    { echo "Built by $(whoami) on $(date)"; \
+      uname -a; \
+      ${scm} status; \
+      ${scm} diff; } >> "${file}"
+}
+
+function install_rpms {
+    local version
+    local rel
+    local pwd
+    local pkg
+    local fileSpec="${pkg}*${version}-${rel}*rpm"
+    local rpms=""
+    version=$(find_version)
+    # shellcheck disable=SC2035
+    rel=$(grep "%define RELEASE" *spec.in | sed "s/.*[ \t]\+\([0-9]\+\)/\1/")
+    pwd=$(pwd)
+    pkg=$(basename "${pwd}")
+
+    for i in "${buildroot}/rpmbuild/RPMS/${arch}/${fileSpec}"/*
+    do
+    # shellcheck disable=SC2046
+      if [ $(grep -c debug "${i}") -eq 0 ]
+          then
+          rpms="${rpms} ${i}"
+      fi
+    done
+    echo "Installing ${rpms}"
+    ${sudo} rpm -Uvh "${rpms}"
+}
+
+function build_bitbucket_repo {
+    local repo=$1
+    local urlPrefix="ssh://cnygard@gitserver:3333/wgrepos/git"
+    echo "Building [$1] from bitbucket [$2]"
+#    build_git_repo $urlPrefix $repo
+}
+
+function upload_rpms {
+    local rpmroot="${1}"
+    local rpmdir="${rpmroot}/rpmbuild/RPMS/${arch}"
+    for i in "${rpmdir}"/*
+    do
+        echo "Uploading [${i}]"
+        scripts/upload-to-yum.sh --args -k --rpmdir "${rpmdir}" --file  "${i}"
+    done
+}
+
+function ensure_buildroot {
+    local path=$1
+
+    [[ -d "${path}" ]] || mkdir -p "${path}";
+}
+
+function clean_buildroot {
+    local path=$1
+    local rpmdir="${path}/RPMS/${arch}"
+
+    [[ -d "${rpmdir}" ]] && rm -f "${rpmdir}"/*rpm;
+}
+
+function build_cmake_github_repo {
+    local repo=$1
+    local branch=${2:-master}
+    local urlPrefix="http://github.com"
+    echo "Building [$1] from github [$2]"
+    build_cmake_git_repo "${urlPrefix}" "${repo}" "${branch}"
+}
+
+function build_github_repo {
+    local repo=$1
+    local branch=${2:-master}
+    local urlPrefix="http://github.com"
+    echo "Building [$1] from github [$2]"
+    build_git_repo "${urlPrefix}" "${repo}" "${branch}"
+}
+
+function get_repodir {
+    local repo=$1
+    local repogit
+    local repodir
+    repogit=$(basename "${repo}")
+    repodir=${repogit//.git/}
+    echo "${repodir}"
+}
+
+function build_cmake_git_repo {
+    local urlPrefix=$1
+    local repo=$2
+    local branch=${3:-master}
+    local pwd
+    local repodir
+    echo "Building [$1] from repo [$2]"
+    pwd=$(pwd)
+    repodir=$(get_repodir "${repo}")
+
+    [ -d "${repodir}" ] && rm -rf "${repodir}"
+    [ -d "${repodir}" ] || git clone "${urlPrefix}/${repo}"
+    cd "${repodir}" || return
+#    git pull origin
+    pwd
+    git status
+    git remote -v
+    git branch -v
+    git branch -r
+    git fetch origin
+    git checkout "${branch}"
+    cmake_build_util .
+
+    cd "${pwd}" || return
+}
+
+function cmake_build_util {
+    local path=$1
+    local pwd
+    echo "Building [${path}]"
+    pwd=$(pwd)
+
+    [ -d "${path}" ] || return;
+    cd "${path}" || return;
+#    git submodule update --init
+    mkdir build
+    cd build || return
+    cmake ..
+    local build=make
+#    ${build} $opts && ${sudo} ${build} $opts install
+    ${build} "${opts}"
+    ${sudo} "${build}" "${opts}" install
+
+    cd "${pwd}" || return
+}
+
+function build_pkgconfig {
+    local urlPrefix=$1
+    local repo=$2
+    local branch=${3:-master}
+    local pwd
+    local repodir
+    pwd=$(pwd)
+    repodir=$(get_repodir "${repo}")
+    echo "Building [$1] from repo [$2]"
+
+    [ -d "${repodir}" ] || git clone "${urlPrefix}/${repo}"
+    cd "${repodir}" || return
+    git fetch origin
+    git checkout "${branch}"
+
+    # fix issues with automake, see https://gitlab.gnome.org/GNOME/glib/issues/1159
+    cp glib/m4macros/glib-gettext.m4 /tmp
+    sed -e s/m4_copy\\\[/m4_copy_force\\\[/ /tmp/glib-gettext.m4 > glib/m4macros/glib-gettext.m4
+    build_util .
+
+    cd "${pwd}" || return
+}
+
+function build_git_repo {
+    local urlPrefix=$1
+    local repo=$2
+    local branch=${3:-master}
+    local pwd
+    local repodir
+    pwd=$(pwd)
+    repodir=$(get_repodir "${repo}")
+    echo "Building [$1] from repo [$2]"
+
+    [ -d "${repodir}" ] || git clone "${urlPrefix}/${repo}"
+    cd "${repodir}" || return
+    git fetch origin
+    git checkout "${branch}"
+    build_util .
+
+    cd "${pwd}" || return
+}
+
+function build_bootstrap {
+    local path=$1
+    local pwd
+    pwd=$(pwd)
+    echo "Building [${path}]"
+
+    [ -d "${path}" ] || return;
+    cd "${path}" || return
+    [ -e bootstrap ] && ./bootstrap --incr --install rpm
+
+    cd "${pwd}" || return
+}
+
+function build_util {
+    local path=$1
+    local pwd
+    pwd=$(pwd)
+    echo "Building [${path}]"
+
+    [[ -d "${path}" ]] || return;
+    cd "${path}" || return;
+    local pkgPath
+    pkgPath=$(pwd)
+    [[ -f Makefile.PL ]] && perl Makefile.PL
+    if [ -f autogen.sh ]
+    then
+        ./autogen.sh
+    else
+        [[ -f configure.ac ]] && ./configure
+        [[ -f configure.in ]] && ./configure
+    fi
+    [[ -f Makefile.dist ]] && opts="-f Makefile.dist"
+    local build=make
+#    ${build} $opts && ${sudo} ${build} $opts install
+
+    local specFile
+    specFile=$(find . -name "*.spec")
+# OEL6.10 has problems with permissions on spec file from within docker build container
+#    [ "x${specFile}" != "x" ] && [ -f "${specFile}" ] && rpmbuild -ba "${specFile}"
+    echo "checking specfile [${specFile}]"
+    if [[ "${specFile}" != ""  &&  -f "${specFile}" ]]
+    then
+        echo "found specfile [${specFile}], building rpm"
+        ensure_buildroot "${buildroot}"/rpmbuild
+        ${build} dist && rpmbuild --root "${buildroot}" -ta ./*.tar.gz && yum -q -y install "${buildroot}"/rpmbuild/RPMS/x86_64/"$(basename "${pkgPath}")"{,-devel}*rpm
+    else
+        echo "no specfile [${specFile}] found"
+        ${build} "${opts}" && ${sudo} "${build}" "${opts}" install
+    fi
+
+    cd "${pwd}" || return
+}
+
+envFlag="n"
+
+if test "$#" -lt "1"
+then
+    exit 1
+fi
+
+while [ $# -gt 0 ]
+do
+# shellcheck disable=SC2034
+  case $1 in
+    --incr) incrRelFlag="Y";;
+    --install) installFlag="Y";;
+    --upload) uploadFlag="Y";;
+    --flag) shift; configureFlag="${configureFlag} $1";;
+    --env) envFlag="Y";;
+    --buildroot) shift; buildroot="$1";;
+    --asroot) sudo="";;
+    rpm) rpmFlag="Y";
+         distFlag="Y";
+         makeFlag="Y";
+         confFlag="Y";;
+    dist) distFlag="Y";
+         makeFlag="Y";
+         confFlag="Y";;
+    make) makeFlag="Y";
+         confFlag="Y";;
+    conf*) confFlag="Y";;
+    *)
+    echo "Usage: bootstrap [--incr] [configure] [make] [dist] [rpm]";
+    echo "   --incr  increment build number"
+    echo
+    echo "Choose one of the target stages to which to build"
+    exit 1
+  esac
+  shift
+done
+
+pkg-config --version
+gcc -v
+
+if [ "${uploadFlag}" = "Y" ]
+then
+    echo "Cleaning ${buildroot}"
+    ensure_buildroot "${buildroot}"/rpmbuild
+    clean_buildroot "${buildroot}"/rpmbuild
+fi
+
+if [ "${incrRelFlag}" = "Y" ]
+then
+    echo "Incrementing release flag"
+    increment_release_flag
+    echo "Increment release flag complete"
+fi
+
+echo "autoconf bootstrap"
+autoconf_bootstrap
+echo "autoconf bootstrap complete"
+
+if [ "${confFlag}" = "Y" ]
+then
+#    echo "[configure --prefix=$(pwd)/rpmbuild/root --libdir=$(pwd)/rpmbuild/root/lib ${configFlags} $configureFlag]...."
+    echo "[configure ${configFlags} ${configureFlag}]...."
+    # shellcheck disable=SC2086
+    ./configure ${configFlags} ${configureFlag} || { echo "configure failed."; exit 1; }
+fi
+
+if [ "${makeFlag}" = "Y" ]
+then
+    echo "[make]...."
+    make || { echo "make failed."; exit 1; }
+fi
+
+if [ "${distFlag}" = "Y" ]
+then
+    echo "[make dist]...."
+    make dist || { echo "make dist failed."; exit 1; }
+fi
+
+if [ "${rpmFlag}" = "Y" ]
+then
+    ensure_buildroot "${buildroot}"/rpmbuild
+    # shellcheck disable=SC2086
+    echo "[rpmbuild --buildroot=${buildroot} -ta ./*.tar.gz]...."
+    echo "pwd: $(pwd) id: $(id) whoami: $(whoami)"
+    ls -al
+    echo "----"
+    ls -al ~
+    rpmbuild --buildroot="${buildroot}" -ta ./*.tar.gz || { echo rm ./*.tar.gz; echo "rpmbuild failed."; exit 1; }
+#    echo "[rpmbuild -ta ./*.tar.gz]...."
+#    rpmbuild -ta ./*.tar.gz || { echo rm ./*.tar.gz; echo "rpmbuild failed."; exit 1; }
+    echo rm ./*.tar.gz
+    log_rpm_info
+fi
+
+[ "${installFlag}" = "Y" ] && install_rpms
+
+[ "${uploadFlag}" = "Y" ] && upload_rpms "${buildroot}"
+
+exit 0

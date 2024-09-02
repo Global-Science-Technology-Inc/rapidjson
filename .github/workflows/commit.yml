@@ -1,0 +1,56 @@
+name: Snapshot
+on:
+  push:
+    branches:
+      - main
+    tags-ignore:
+      - release-**
+      - v**
+  pull_request:
+    branches: [master, main, release-**, v**, bugfix/**, feature/**]
+
+env:
+  REGISTRY: ghcr.io
+  ORG: global-science-technology-inc
+  RPM_NAME: "hash"
+
+permissions: read-all
+
+jobs:
+  package:
+    name: Build dist
+    runs-on: ubuntu-latest
+    # checkov:skip=CKV2_GHA_1
+    permissions:
+      contents: read
+      packages: read
+      statuses: write
+    steps:
+      - name: Package distribution
+        uses: global-science-technology-inc/gst-actions/package-source@main
+        with:
+          rpm_name: ${{ env.RPM_NAME }}
+
+  build:
+    name: Build RPM
+    runs-on: ubuntu-latest
+    # checkov:skip=CKV2_GHA_1
+    permissions:
+      contents: read
+      packages: write
+      statuses: write
+    needs:
+      - package
+    container:
+      image: ghcr.io/global-science-technology-inc/centos9-build-image:0.1.2
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Package distribution
+        uses: global-science-technology-inc/gst-actions/build-rpm@main
+        with:
+          rpm_name: ${{ env.RPM_NAME }}
+          spec_file: ${{ env.RPM_NAME }}.spec
+          pc_file: pc/${{ env.RPM_NAME }}.pc.in
+          password: ${{ secrets.NEXUS_PASSWORD }}

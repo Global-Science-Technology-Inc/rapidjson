@@ -1,0 +1,84 @@
+name: Release
+on:
+  push:
+    tags:
+      - release-**
+      - v**
+
+env:
+  REGISTRY: ghcr.io
+  ORG: global-science-technology-inc
+  NEXUS_URL: https://nexus.gst.com
+  RPM_NAME: "hash"
+
+permissions: read-all
+
+jobs:
+  lint:
+    name: Lint Code Base
+    runs-on: ubuntu-latest
+    # checkov:skip=CKV2_GHA_1
+    permissions:
+      contents: read
+      packages: read
+      statuses: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          # Full git history is needed to get a proper list of
+          # changed files within `super-linter`
+          fetch-depth: 0
+      - name: Lint Code Base
+        uses: super-linter/super-linter/slim@v7
+        env:
+          VALIDATE_ALL_CODEBASE: true
+          VALIDATE_CPP: false
+          VALIDATE_CLANG_FORMAT: false
+          VALIDATE_JSCPD: false
+          VALIDATE_SHELL_SHFMT: false
+          DEFAULT_BRANCH: main
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  package:
+    name: Build dist
+    runs-on: ubuntu-latest
+    # checkov:skip=CKV2_GHA_1
+    permissions:
+      contents: read
+      packages: read
+      statuses: write
+    steps:
+      - name: Package distribution
+        uses: global-science-technology-inc/gst-actions/package-source@main
+        with:
+          rpm_name: ${{ env.RPM_NAME }}
+
+  build:
+    name: Build RPM and publish
+    runs-on: ubuntu-latest
+    # checkov:skip=CKV2_GHA_1
+    permissions:
+      contents: read
+      packages: write
+      statuses: write
+    needs:
+      - package
+    container:
+      image: ghcr.io/global-science-technology-inc/centos9-build-image:0.1.2
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Package distribution
+        uses: global-science-technology-inc/gst-actions/build-rpm@main
+        with:
+          rpm_name: ${{ env.RPM_NAME }}
+          spec_file: ${{ env.RPM_NAME }}.spec
+          pc_file: pc/${{ env.RPM_NAME }}.pc.in
+          server_url: ${{ env.NEXUS_URL }}
+          username: gst-wx-yum
+          password: ${{ secrets.NEXUS_PASSWORD }}
+          extension: rpm
+          repository: gst-wx
+          do_publish: "true"

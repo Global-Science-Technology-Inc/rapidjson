@@ -1,0 +1,143 @@
+
+# Note that this is NOT a relocateable package
+
+%define name            @PACKAGE@
+%define ver             @RELEASE@
+%define RELEASE         @BUILD@
+%define rel             %{?CUSTOM_RELEASE} %{!?CUSTOM_RELEASE:%RELEASE}
+%define prefix          /usr
+%define mandir          /usr/man
+%define datadir         /usr/share
+%define sysconfdir      /etc
+%define localstatedir   /var/lib
+%define _debugsource_packages  %{nil}
+%global debug_package %{nil}
+
+Summary:    RapidJSON RPM spec
+Name:       %name
+Version:    %ver
+Release:    %rel
+Source:     http://yum.gst.com/packages/%{name}-%{version}.tar.gz
+License:    GST Proprietary License
+Group:      GST
+#BuildArch:  noarch
+BuildRoot:  %{_tmppath}/%{name}-%{ver}-root
+URL:        http://yum.gst.com/packages/index.html
+
+BuildRequires: sudo
+BuildRequires: gcc
+BuildRequires: gcc-c++
+BuildRequires: make
+BuildRequires: autoconf
+BuildRequires: automake
+BuildRequires: libtool
+BuildRequires: tar
+BuildRequires: cmake
+BuildRequires: bc
+BuildRequires: zlib
+BuildRequires: autoconf
+BuildRequires: bash
+BuildRequires: gzip
+BuildRequires: rpm-build
+BuildRequires: git
+BuildRequires: sed
+BuildRequires: wget
+BuildRequires: curl
+BuildRequires: m4
+BuildRequires: libgcc
+BuildRequires: libstdc++
+BuildRequires: libstdc++-devel
+
+%description
+hash
+
+%package devel
+Summary: development tools for hash
+Group: Development/Libraries
+Requires: %name = %version
+
+%description devel
+The %name-devel package contains the header files needed for development
+with %name.
+
+%global __requires_exclude perl\\((MWS|MetlabConfig|Metlab|VSpec|Gtk2|Cascade).*\\)
+
+#==============================================================================
+# preparation section
+#==============================================================================
+
+%prep
+%setup -q -n %{name}-%{version}
+
+#==============================================================================
+# build section
+#==============================================================================
+
+%build
+export PATH=`pwd`/pc:/usr/local/bin:$PATH
+export PKG_CONFIG_PATH=$PKG_CONFIG_PATH:/usr/local/lib/pkgconfig:`pwd`/pc
+echo "${PATH}"
+which pkg-config
+pkg-config --version
+%configure --enable-static --enable-shared @RPM_CFG_ARGS@
+%cmake
+%cmake_build
+
+#==============================================================================
+# install section
+#==============================================================================
+
+%install
+#export PATH=`pwd`/pc:$PATH
+#export PKG_CONFIG_PATH=$PKG_CONFIG_PATH:/usr/local/lib/pkgconfig:`pwd`/pc
+
+#if [ -d %{buildroot} ]; then rm -rf %{buildroot}; fi
+#make DESTDIR=%{buildroot} install
+
+# new redhat versions don't use .la
+##rm -f %{buildroot}%{_libdir}/*.la
+
+%cmake_install
+
+
+#==============================================================================
+# cleanup section
+#==============================================================================
+
+%post
+/sbin/ldconfig
+
+%postun
+/sbin/ldconfig
+
+
+%posttrans
+
+%clean
+rm -rf %{buildroot}
+
+#==============================================================================
+# files that go into libcast package
+#==============================================================================
+%files devel
+%defattr(-, root, root)
+#%doc CHANGES PORTING
+%{_includedir}/*
+%{_includedir}/*/*
+%{_libdir}/*.*a
+%{_libdir}/*.so*
+%{_libdir}/pkgconfig/*.pc
+
+
+%files
+%defattr(-, root, root)
+%doc COPYING AUTHORS README ChangeLog NEWS INSTALL
+%{_libdir}/*.so*
+
+#%attr(755,root,root) %{prefix}/lib/lib*.so.*
+
+#==============================================================================
+
+%changelog
+* Sun Jun 16 2013 Carl Nygard <cjnygard@gmail.com> 0.1.0-1
+- integrate autotools
